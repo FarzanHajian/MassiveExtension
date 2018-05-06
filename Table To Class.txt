@@ -1,0 +1,3 @@
+select 'public '+ (case ty.name when 'int' then 'int' else 'string' end) + ' ' + c.name + ' { get; set; }', ty.name from sys.columns c
+inner join sys.tables t on t.object_id = c.object_id and t.name = 'Products'
+inner join sys.types ty on ty.user_type_id = c.user_type_id
