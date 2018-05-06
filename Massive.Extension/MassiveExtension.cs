@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data.Common;
 using System.Dynamic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using static Slapper.AutoMapper;
 
@@ -230,7 +232,8 @@ namespace Massive
         /// Enables you to insert POCO objects (which contain a property for primary key) instead of dynamic object.
         /// If the object owns a property for its PK, Massive <c>Insert</c> method tries to insert it into the database
         /// (along with other properties) and this operation fails when PK column is auto increment in the database.
-        /// This method stops the PK property from being inserted.
+        /// This method stops the PK property from being inserted. It also recognizes
+        /// System.ComponentModel.DataAnnotations.Schema.NotMappedAttribute if your POCOs havae navigation properties.
         /// </summary>
         /// <param name="o">The POCO object to be inserted</param>
         /// <returns>The inserted object returned by <see cref="Insert(object)"/>
@@ -239,7 +242,14 @@ namespace Massive
         {
             var oAsExpando = o.ToExpando();
             var oAsDictionary = (IDictionary<string, object>)oAsExpando;
-            oAsDictionary.Remove(PrimaryKeyField);
+            oAsDictionary.Remove(PrimaryKeyField);  // Removing the PK.
+
+            foreach (PropertyInfo property in o.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                // Removing the properties with NotMappedAttribute.
+                if (property.GetCustomAttribute<NotMappedAttribute>() != null) oAsDictionary.Remove(property.Name);
+            }
+
             dynamic result = Insert(oAsDictionary);
             o.GetType().GetProperty(PrimaryKeyField).SetValue(o, oAsDictionary[PrimaryKeyField]);
             return result;
@@ -247,7 +257,9 @@ namespace Massive
 
         /// <summary>
         /// Perform a batch insert operation. Unlike <c>Save</c> which sends a separate command for every object
-        /// to the database, this method sends a single command.
+        /// to the database, this method sends a single command. It also recognizes
+        /// System.ComponentModel.DataAnnotations.Schema.NotMappedAttribute if you want to pass POCOs instead of
+        /// dynamics and your POCO objects have navigation properties.
         /// Also <c>BeforeSave</c> and <c>Inserted</c> are called once for the entire batch.
         /// </summary>
         /// <param name="batch">The objects to be inserted</param>
@@ -255,7 +267,7 @@ namespace Massive
         public int InsertBatch(params object[] batch)
         {
             int result = 0;
-            ICollection<IDictionary<string, object>> dict = batch.ToDictionary();    // Converting batch items to dictionary (ExpandoObject).
+            IDictionary<string, object>[] dict = batch.ToDictionary();    // Converting batch items to dictionaries (ExpandoObjects).
 
             if (!IsValid(dict))
                 throw new InvalidOperationException("Can't insert: " + string.Join("; ", Errors.ToArray()));
@@ -271,8 +283,10 @@ namespace Massive
                         {
                             DbCommand sequenceCmd = CreateCommand(GetIdentityRetrievalScalarStatement(), con);
                             sequenceCmd.Transaction = tran;
-                            foreach (var item in dict)
-                                item[PrimaryKeyField] = Convert.ToInt32(sequenceCmd.ExecuteScalar());
+                            for (int i = 0; i < dict.Length; i++)
+                            {
+                                dict[i][PrimaryKeyField] = Convert.ToInt32(sequenceCmd.ExecuteScalar());
+                            }
                             includePrimaryKeyInSql = true;
                         }
 
@@ -300,7 +314,7 @@ namespace Massive
         public int UpdateBatch(params object[] batch)
         {
             int result = 0;
-            ICollection<IDictionary<string, object>> dict = batch.ToDictionary();    // Converting batch items to dictionary (ExpandoObject).
+            IDictionary<string, object>[] dict = batch.ToDictionary();    // Converting batch items to dictionaries (ExpandoObjects).
 
             if (!IsValid(dict))
                 throw new InvalidOperationException("Can't Update: " + string.Join("; ", Errors.ToArray()));
@@ -332,7 +346,7 @@ namespace Massive
         public int DeleteBatch(params object[] batch)
         {
             int result = 0;
-            ICollection<IDictionary<string, object>> dict = batch.ToDictionary();    // Converting batch items to dictionary (ExpandoObject).
+            IDictionary<string, object>[] dict = batch.ToDictionary();    // Converting batch items to dictionaries (ExpandoObjects).
 
             if (BeforeDelete(dict))
             {
@@ -363,7 +377,7 @@ namespace Massive
         /// <param name="connectionToUse">A live connection to the database</param>
         /// <param name="includePrimaryKey">The PK proeprty is inserted nro no</param>
         /// <returns>The created command object</returns>
-        private DbCommand CreateInsertCommandForBatch(ICollection<IDictionary<string, object>> batch, DbConnection connectionToUse, bool includePrimaryKey)
+        private DbCommand CreateInsertCommandForBatch(IDictionary<string, object>[] batch, DbConnection connectionToUse, bool includePrimaryKey)
         {
             DbCommand result = CreateCommand(null, connectionToUse);
             StringBuilder sql = new StringBuilder();
@@ -372,19 +386,19 @@ namespace Massive
             string insertQueryPattern = GetInsertQueryPattern() + ";";
             int counter = 0;
 
-            foreach (KeyValuePair<string, object> item in batch.First())
+            foreach (KeyValuePair<string, object> item in batch[0])
             {
-                if (!includePrimaryKey && item.Key.Equals(PrimaryKeyField, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!includePrimaryKey && item.Key.Equals(PrimaryKeyField, StringComparison.OrdinalIgnoreCase)) continue;   // Ignoring the PK.
                 fieldNames.Add(item.Key);
             }
 
             if (fieldNames.Count > 0)
             {
-                foreach (IDictionary<string, object> obj in batch)
+                for (int i = 0; i < batch.Length; i++)
                 {
-                    foreach (KeyValuePair<string, object> item in obj)
+                    foreach (KeyValuePair<string, object> item in batch[i])
                     {
-                        if (!includePrimaryKey && item.Key.Equals(PrimaryKeyField, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!includePrimaryKey && item.Key.Equals(PrimaryKeyField, StringComparison.OrdinalIgnoreCase)) continue;   // Ignoring the PK.
                         valueParameters.Add(PrefixParameterName(counter.ToString()));
                         result.AddParam(item.Value);
                         counter++;
@@ -408,7 +422,7 @@ namespace Massive
         /// <param name="batch">A collection of items to be updated (in the form of Dictionary / ExpandoObjects)</param>
         /// <param name="connectionToUse">A live connection to the database</param>
         /// <returns>The created command object</returns>
-        private DbCommand CreateUpdateCommandForBatch(ICollection<IDictionary<string, object>> batch, DbConnection connectionToUse)
+        private DbCommand CreateUpdateCommandForBatch(IDictionary<string, object>[] batch, DbConnection connectionToUse)
         {
             DbCommand result = CreateCommand(null, connectionToUse);
             StringBuilder sql = new StringBuilder();
@@ -416,8 +430,9 @@ namespace Massive
             var updateQueryPattern = GetUpdateQueryPattern() + $"WHERE {PrimaryKeyField} = {{2}};";
             int counter = 0;
 
-            foreach (IDictionary<string, object> obj in batch)
+            for (int i = 0; i < batch.Length; i++)
             {
+                IDictionary<string, object> obj = batch[i];
                 foreach (KeyValuePair<string, object> item in obj)
                 {
                     var val = item.Value;
@@ -425,12 +440,12 @@ namespace Massive
                     {
                         if (item.Value == null)
                         {
-                            fieldSetFragments.Add(string.Format("{0} = NULL", item.Key));
+                            fieldSetFragments.Add($"{item.Key} = NULL");
                         }
                         else
                         {
                             result.AddParam(val);
-                            fieldSetFragments.Add(string.Format("{0} = {1}", item.Key, PrefixParameterName(counter.ToString())));
+                            fieldSetFragments.Add($"{item.Key} = {PrefixParameterName(counter.ToString())}");
                             counter++;
                         }
                     }
@@ -457,16 +472,16 @@ namespace Massive
         /// <param name="batch">A collection of items to be deleted (in the form of Dictionary / ExpandoObjects)</param>
         /// <param name="connectionToUse">A live connection to the database</param>
         /// <returns>The created command object</returns>
-        private DbCommand CreateDeleteCommandForBatch(ICollection<IDictionary<string, object>> batch, DbConnection connectionToUse)
+        private DbCommand CreateDeleteCommandForBatch(IDictionary<string, object>[] batch, DbConnection connectionToUse)
         {
             DbCommand result = CreateCommand(null, connectionToUse);
             StringBuilder sql = new StringBuilder();
             var deleteQueryPattern = string.Format(GetDeleteQueryPattern(), TableName) + $"WHERE {PrimaryKeyField} IN ({{0}});";
             int counter = 0;
 
-            foreach (IDictionary<string, object> obj in batch)
+            for (int i = 0; i < batch.Length; i++)
             {
-                result.AddParam(obj[PrimaryKeyField]);
+                result.AddParam(batch[i][PrimaryKeyField]);
                 sql.Append(PrefixParameterName(counter.ToString() + ","));
                 counter++;
             }
@@ -482,14 +497,28 @@ namespace Massive
     public static partial class ObjectExtensions
     {
         /// <summary>
-        /// Converts a batch of objects to a collection of Dinctionaries (ExpoandObjects).
+        /// Converts a batch of objects to a collection of Dictionaries (ExpoandObjects).
         /// </summary>
         /// <param name="batch">The input objects to be converted</param>
         /// <returns>A collection of converted objects</returns>
-        public static ICollection<IDictionary<string, object>> ToDictionary(this IEnumerable<object> batch)
+        public static IDictionary<string, object>[] ToDictionary(this object[] batch)
         {
-            ICollection<IDictionary<string, object>> result = new LinkedList<IDictionary<string, object>>();
-            foreach (var item in batch) result.Add(item.ToExpando());
+            IDictionary<string, object>[] result = new IDictionary<string, object>[batch.Length];
+            PropertyInfo[] properties = batch[0].GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+            for (int i = 0; i < batch.Length; i++)
+            {
+                object item = batch[i];
+                IDictionary<string, object> expando = item.ToExpando();
+
+                foreach (PropertyInfo property in properties)
+                {
+                    // Removing the properties with NotMappedAttribute.
+                    if (property.GetCustomAttribute<NotMappedAttribute>() != null) expando.Remove(property.Name);
+                }
+
+                result[i] = expando;
+            }
             return result;
         }
 

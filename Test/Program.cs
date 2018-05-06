@@ -20,10 +20,10 @@ namespace Test
             //CustomerLoadTestPoco();
             //CustomerLoadTestDynamic();
 
-            //LoadProductsWithparentsPoco();
-            //LoadProductsWithParentsDynamic();
+            LoadProductsWithparentsPoco();
+            LoadProductsWithParentsDynamic();
 
-            BatchInsertProduct();
+            //BatchInsertProduct();
 
             Console.ReadLine();
         }
@@ -60,25 +60,25 @@ namespace Test
 
         private static void LoadProductsWithparentsPoco()
         {
-            //var products = new ProductRepository();
-            //IEnumerable<Product> data;
+            var products = new ProductRepository();
+            IEnumerable<Product> data;
 
-            //Stopwatch sw = Stopwatch.StartNew();
-            //for (int i = 0; i < 1_000; i++)
-            //{
-            //    data = products.QueryAndLink<Product>(
-            //        @"select p.*, null as ___, s.*, null as ___, c.*
-            //            from Products p
-            //            inner join Suppliers s on s.SupplierID=p.SupplierID
-            //            inner join Categories c on c.CategoryID=p.CategoryID",
-            //        (m, linkeds) => { m.Supplier = (Supplier)linkeds[0]; m.Category = (Category)linkeds[1]; },
-            //        new Type[] { typeof(Supplier), typeof(Category) },
-            //        true
-            //    ).ToList();
-            //}
-            //sw.Stop();
+            Stopwatch sw = Stopwatch.StartNew();
+            for (int i = 0; i < 1_000; i++)
+            {
+                data = products.QueryAndLink<Product>(
+                    @"select p.*, null as ___, s.*, null as ___, c.*
+                        from Products p
+                        inner join Suppliers s on s.SupplierID=p.SupplierID
+                        inner join Categories c on c.CategoryID=p.CategoryID",
+                    (m, linkeds) => { m.Supplier = (Supplier)linkeds[0]; m.Category = (Category)linkeds[1]; },
+                    new Type[] { typeof(Supplier), typeof(Category) },
+                    true
+                ).ToList();
+            }
+            sw.Stop();
 
-            //Console.WriteLine($"{nameof(LoadProductsWithparentsPoco)} => {sw.ElapsedMilliseconds:N0}");
+            Console.WriteLine($"{nameof(LoadProductsWithparentsPoco)} => {sw.ElapsedMilliseconds:N0}");
         }
 
         private static void LoadProductsWithParentsDynamic()
