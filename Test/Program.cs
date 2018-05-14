@@ -20,10 +20,10 @@ namespace Test
             //CustomerLoadTestPoco();
             //CustomerLoadTestDynamic();
 
-            LoadProductsWithparentsPoco();
-            LoadProductsWithParentsDynamic();
+            //LoadProductsWithparentsPoco();
+            //LoadProductsWithParentsDynamic();
 
-            //BatchInsertProduct();
+            BatchInsertProduct();
 
             Console.ReadLine();
         }
