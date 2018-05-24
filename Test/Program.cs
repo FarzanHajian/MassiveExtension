@@ -71,8 +71,8 @@ namespace Test
                         from Products p
                         inner join Suppliers s on s.SupplierID=p.SupplierID
                         inner join Categories c on c.CategoryID=p.CategoryID",
-                    (m, linkeds) => { m.Supplier = (Supplier)linkeds[0]; m.Category = (Category)linkeds[1]; },
                     new Type[] { typeof(Supplier), typeof(Category) },
+                    (m, linkeds) => { m.Supplier = (Supplier)linkeds[0]; m.Category = (Category)linkeds[1]; },
                     true
                 ).ToList();
             }
@@ -94,6 +94,7 @@ namespace Test
                         from Products p
                         inner join Suppliers s on s.SupplierID=p.SupplierID
                         inner join Categories c on c.CategoryID=p.CategoryID",
+                    2,
                     (m, linkeds) => { m.Supplier = linkeds[0]; m.Category = linkeds[1]; },
                     true
                 ).ToList();

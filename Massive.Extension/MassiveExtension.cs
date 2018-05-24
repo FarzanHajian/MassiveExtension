@@ -18,7 +18,7 @@ namespace Massive
     {
         public delegate void MapperCallback<TMainObject, TLinkedObjects>(TMainObject mainObject, TLinkedObjects[] linkedObjects);
 
-        private const string SPLITTER_COLUMN = "___";
+        public const string SPLITTER_COLUMN = "__";
 
         /// <summary>
         /// Searches for a record based on its primary key.
@@ -95,21 +95,22 @@ namespace Massive
         /// NOTE: If you are familiar with Dapper.Net, this is what multi mapping feature does.
         /// </summary>
         /// <param name="sql">The SQL query to be executed</param>
+        /// <param name="linkedObjectsCount">Number of linked objects that each row expects to return</param>
         /// <param name="mapper">The callback that is called for each record to make associations. The first
         /// parameter of the callback is the main object and the second one is a list of associated objects
         /// </param>
         /// <param name="useSplitter">Determines how objects must be splitted in rows. If false is passed,
         /// objects are splitted by columns with name of "id" (case-insesitive).
         /// If true is passed, your query must return some special columns (AKA splitter columns) that delimit
-        /// columns of each individual object. To specify splitter columns have their names start with <c>SPLITTER_COLUMN</c></param>
+        /// columns of each individual object. For a column to be a splitter column, its name must be the value
+        /// of <c>SPLITTER_COLUMN</c> constant</param>
         /// <param name="args">The parameter values</param>
         /// <returns>Streaming enumerable with expandos, one for each row read</returns>
-        public IEnumerable<dynamic> QueryAndLink(string sql, MapperCallback<dynamic, dynamic> mapper, bool useSplitter, params object[] args)
+        public IEnumerable<dynamic> QueryAndLink(string sql, int linkedObjectsCount, MapperCallback<dynamic, dynamic> mapper, bool useSplitter, params object[] args)
         {
-            int linkedObjectsCount = 19;            // I think the maximum objects returned from a record is 20 (1 main object and 19 linked objects). If you need more you can change it here.
-            dynamic mainObject = null;              // The main object that is read from each record.
-            object[] linkedObjects = new object[linkedObjectsCount];     // List of the objects that are read from each record.
-            int objectIndex;                        // Index of the last item in "linkedObjects".
+            dynamic mainObject = null;                                  // The main object that is read from each record.
+            object[] linkedObjects = new object[linkedObjectsCount];    // List of the objects that are read from each record.
+            int objectIndex;                                            // Index of the last item in "linkedObjects".
 
             using (DbConnection con = OpenConnection())
             {
@@ -128,7 +129,14 @@ namespace Massive
                         {
                             string fieldName = reader.GetName(i);
 
-                            if (useSplitter && fieldName.StartsWith(SPLITTER_COLUMN))
+                            if (i == 0)
+                            {
+                                /* It is the first column that was retrieved (meaning it is the begining of the first object in the record).
+                                 * Columns must be mapped to a new object from now on. */
+                                obj = new ExpandoObject();
+                                mainObject = obj;
+                            }
+                            else if (useSplitter && fieldName == SPLITTER_COLUMN)
                             {
                                 // A splitter column is found. Columns must be mapped to a new object from now on.
                                 obj = new ExpandoObject();
@@ -141,19 +149,12 @@ namespace Massive
                                 obj = new ExpandoObject();
                                 linkedObjects[objectIndex++] = obj;
                             }
-                            else if (i == 0)
-                            {
-                                /* It is the first column that was retrieved (meaning it is the begining of the first object in the record).
-                                 * Columns must be mapped to a new object from now on. */
-                                obj = new ExpandoObject();
-                                mainObject = obj;
-                            }
 
                             object temp = reader.GetValue(i);
                             obj[fieldName] = (temp == DBNull.Value ? null : temp);
                         }
 
-                        mapper.Invoke(mainObject, linkedObjects);
+                        mapper?.Invoke(mainObject, linkedObjects);
                         yield return mainObject;
                     }
                 }
@@ -161,15 +162,15 @@ namespace Massive
         }
 
         /// <summary>
-        /// Statically-typed version of <seealso cref="QueryAndLink(string, MapperCallback{dynamic, dynamic}, bool, object[])"/> method.
+        /// Statically-typed version of <seealso cref="QueryAndLink(string,  int, MapperCallback{dynamic, dynamic},bool, object[])"/> method.
         /// </summary>
         /// <returns>Streaming enumerable with objects of type T, one for each row read</returns>
-        public IEnumerable<T> QueryAndLink<T>(string sql, MapperCallback<T, object> mapper, Type[] linkedTypes, bool useSplitter, params object[] args) where T : class, new()
+        public IEnumerable<T> QueryAndLink<T>(string sql, Type[] linkedTypes, MapperCallback<T, object> mapper, bool useSplitter, params object[] args) where T : class, new()
         {
             int linkedObjectsCount = linkedTypes.Length;
-            T mainObject = null;                        // The main object that is read from each record.
+            T mainObject = null;                                        // The main object that is read from each record.
             object[] linkedObjects = new object[linkedObjectsCount];    // List of the linked objects that are read from each record.
-            int objectIndex;                            // Index of the last item in "linkedObjects".
+            int objectIndex;                                            // Index of the last item in "linkedObjects".
             IEnumerator typeEnumerator = linkedTypes.GetEnumerator();
             Type objectType = null;
 
@@ -191,7 +192,15 @@ namespace Massive
                         {
                             string fieldName = reader.GetName(i);
 
-                            if (useSplitter && fieldName.StartsWith(SPLITTER_COLUMN))
+                            if (i == 0)
+                            {
+                                /* It is the first column that was retrieved (meaning it is the begining of the first object in the record).
+                                 * Columns must be mapped to a new object from now on. */
+                                objectType = typeof(T);
+                                mainObject = new T();
+                                obj = mainObject;
+                            }
+                            else if (useSplitter && fieldName == SPLITTER_COLUMN)
                             {
                                 // A splitter column is found. Columns must be mapped to a new object from now on.
                                 typeEnumerator.MoveNext();
@@ -208,20 +217,12 @@ namespace Massive
                                 obj = Activator.CreateInstance(objectType);
                                 linkedObjects[objectIndex++] = obj;
                             }
-                            else if (i == 0)
-                            {
-                                /* It is the first column that was retrieved (meaning it is the begining of the first object in the record).
-                                 * Columns must be mapped to a new object from now on. */
-                                objectType = typeof(T);
-                                mainObject = new T();
-                                obj = mainObject;
-                            }
 
                             object temp = reader.GetValue(i);
                             objectType.GetProperty(fieldName)?.SetValue(obj, (temp == DBNull.Value ? null : temp));
                         }
 
-                        mapper.Invoke(mainObject, linkedObjects);
+                        mapper?.Invoke(mainObject, linkedObjects);
                         yield return mainObject;
                     }
                 }
